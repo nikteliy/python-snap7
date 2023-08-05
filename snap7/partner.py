@@ -9,23 +9,13 @@ is requesting the connection.
 """
 import re
 import logging
-from ctypes import byref, c_int, c_int32, c_uint32, c_void_p
+from ctypes import byref, c_int, c_int32, c_uint32, c_void_p, _CData
 from typing import Tuple, Optional
 
 from .common import ipv4, check_error, load_library
 from .types import S7Object, param_types, word
 
 logger = logging.getLogger(__name__)
-
-
-def error_wrap(func):
-    """Parses a s7 error code returned the decorated function."""
-
-    def f(*args, **kw):
-        code = func(*args, **kw)
-        check_error(code, context="partner")
-
-    return f
 
 
 class Partner:
@@ -36,10 +26,10 @@ class Partner:
 
     def __init__(self, active: bool = False):
         self._library = load_library()
-        self._pointer = None
+        self._pointer: Optional[S7Object] = None
         self.create(active)
 
-    def __del__(self):
+    def __del__(self) -> None:
         self.destroy()
 
     def as_b_send(self) -> int:
@@ -89,7 +79,7 @@ class Partner:
 
         return return_values[result], op_result
 
-    def create(self, active: bool = False):
+    def create(self, active: bool = False) -> None:
         """
         Creates a Partner and returns its handle, which is the reference that
         you have to use every time you refer to that Partner.
@@ -100,15 +90,14 @@ class Partner:
         self._library.Par_Create.restype = S7Object
         self._pointer = S7Object(self._library.Par_Create(int(active)))
 
-    def destroy(self):
+    def destroy(self) -> None:
         """
         Destroy a Partner of given handle.
         Before destruction the Partner is stopped, all clients disconnected and
         all shared memory blocks released.
         """
-        if self._library:
+        if self._library and self._pointer:
             return self._library.Par_Destroy(byref(self._pointer))
-        return None
 
     def get_last_error(self) -> c_int32:
         """
@@ -119,7 +108,7 @@ class Partner:
         check_error(result, "partner")
         return error
 
-    def get_param(self, number) -> int:
+    def get_param(self, number: int) -> int:
         """
         Reads an internal Partner object parameter.
         """
@@ -167,13 +156,13 @@ class Partner:
         check_error(result, "partner")
         return send_time, recv_time
 
-    @error_wrap
-    def set_param(self, number: int, value) -> int:
+    def set_param(self, number: int, value: int) -> int:
         """Sets an internal Partner object parameter.
         """
         logger.debug(f"setting param number {number} to {value}")
-        return self._library.Par_SetParam(self._pointer, number,
-                                          byref(c_int(value)))
+        result = self._library.Par_SetParam(self._pointer, number, byref(c_int(value)))
+        check_error(result, "partner")
+        return result
 
     def set_recv_callback(self) -> int:
         """
@@ -189,15 +178,15 @@ class Partner:
         """
         return self._library.Par_SetSendCallback(self._pointer)
 
-    @error_wrap
     def start(self) -> int:
         """
         Starts the Partner and binds it to the specified IP address and the
         IsoTCP port.
         """
-        return self._library.Par_Start(self._pointer)
+        result = self._library.Par_Start(self._pointer)
+        check_error(result, context="partner")
+        return result
 
-    @error_wrap
     def start_to(self, local_ip: str, remote_ip: str, local_tsap: int, remote_tsap: int) -> int:
         """
         Starts the Partner and binds it to the specified IP address and the
@@ -214,9 +203,11 @@ class Partner:
         if not re.match(ipv4, remote_ip):
             raise ValueError(f"{remote_ip} is invalid ipv4")
         logger.info(f"starting partnering from {local_ip} to {remote_ip}")
-        return self._library.Par_StartTo(self._pointer, local_ip.encode(), remote_ip.encode(),
+        result = self._library.Par_StartTo(self._pointer, local_ip.encode(), remote_ip.encode(),
                                          word(local_tsap),
                                          word(remote_tsap))
+        check_error(result, context="partner")
+        return result
 
     def stop(self) -> int:
         """
@@ -224,10 +215,11 @@ class Partner:
         """
         return self._library.Par_Stop(self._pointer)
 
-    @error_wrap
     def wait_as_b_send_completion(self, timeout: int = 0) -> int:
         """
         Waits until the current asynchronous send job is done or the timeout
         expires.
         """
-        return self._library.Par_WaitAsBSendCompletion(self._pointer, timeout)
+        result = self._library.Par_WaitAsBSendCompletion(self._pointer, timeout)
+        check_error(result, context="partner")
+        return result

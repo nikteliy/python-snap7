@@ -86,7 +86,7 @@ import re
 import time
 import struct
 import logging
-from typing import Dict, Union, Callable, Optional, List
+from typing import Dict, Union, Callable, Optional, List, Iterator, Hashable, Any, cast
 from datetime import date, datetime, timedelta
 from collections import OrderedDict
 
@@ -132,7 +132,7 @@ def get_bool(bytearray_: bytearray, byte_index: int, bool_index: int) -> bool:
     return current_value == index_value
 
 
-def set_bool(bytearray_: bytearray, byte_index: int, bool_index: int, value: bool):
+def set_bool(bytearray_: bytearray, byte_index: int, bool_index: int, value: bool) -> None:
     """Set boolean value on location in bytearray.
 
     Args:
@@ -204,10 +204,10 @@ def get_byte(bytearray_: bytearray, byte_index: int) -> bytes:
     data[0] = data[0] & 0xff
     packed = struct.pack('B', *data)
     value = struct.unpack('B', packed)[0]
-    return value
+    return cast(bytes, value)
 
 
-def set_word(bytearray_: bytearray, byte_index: int, _int: int):
+def set_word(bytearray_: bytearray, byte_index: int, _int: int) -> bytearray:
     """Set value in bytearray to word
 
     Notes:
@@ -227,7 +227,7 @@ def set_word(bytearray_: bytearray, byte_index: int, _int: int):
     return bytearray_
 
 
-def get_word(bytearray_: bytearray, byte_index: int) -> bytearray:
+def get_word(bytearray_: bytearray, byte_index: int) -> int:
     """Get word value from bytearray.
 
     Notes:
@@ -249,11 +249,11 @@ def get_word(bytearray_: bytearray, byte_index: int) -> bytearray:
     data[1] = data[1] & 0xff
     data[0] = data[0] & 0xff
     packed = struct.pack('2B', *data)
-    value = struct.unpack('>H', packed)[0]
+    value: int = struct.unpack('>H', packed)[0]
     return value
 
 
-def set_int(bytearray_: bytearray, byte_index: int, _int: int):
+def set_int(bytearray_: bytearray, byte_index: int, _int: int) -> bytearray:
     """Set value in bytearray to int
 
     Notes:
@@ -301,11 +301,11 @@ def get_int(bytearray_: bytearray, byte_index: int) -> int:
     data[1] = data[1] & 0xff
     data[0] = data[0] & 0xff
     packed = struct.pack('2B', *data)
-    value = struct.unpack('>h', packed)[0]
+    value: int = struct.unpack('>h', packed)[0]
     return value
 
 
-def set_uint(bytearray_: bytearray, byte_index: int, _int: int):
+def set_uint(bytearray_: bytearray, byte_index: int, _int: int) -> bytearray:
     """Set value in bytearray to unsigned int
 
     Notes:
@@ -355,11 +355,11 @@ def get_uint(bytearray_: bytearray, byte_index: int) -> int:
     data[1] = data[1] & 0xff
     data[0] = data[0] & 0xff
     packed = struct.pack('2B', *data)
-    value = struct.unpack('>H', packed)[0]
+    value: int = struct.unpack('>H', packed)[0]
     return value
 
 
-def set_real(bytearray_: bytearray, byte_index: int, real) -> bytearray:
+def set_real(bytearray_: bytearray, byte_index: int, real: Union[bool, str, int, float]) -> bytearray:
     """Set Real value
 
     Notes:
@@ -380,8 +380,8 @@ def set_real(bytearray_: bytearray, byte_index: int, real) -> bytearray:
             bytearray(b'B\\xf6\\xa4Z')
     """
     real = float(real)
-    real = struct.pack('>f', real)
-    _bytes = struct.unpack('4B', real)
+    buffer = struct.pack('>f', real)
+    _bytes = struct.unpack('4B', buffer)
     for i, b in enumerate(_bytes):
         bytearray_[byte_index + i] = b
     return bytearray_
@@ -407,11 +407,11 @@ def get_real(bytearray_: bytearray, byte_index: int) -> float:
             123.32099914550781
     """
     x = bytearray_[byte_index:byte_index + 4]
-    real = struct.unpack('>f', struct.pack('4B', *x))[0]
+    real: float = struct.unpack('>f', struct.pack('4B', *x))[0]
     return real
 
 
-def set_fstring(bytearray_: bytearray, byte_index: int, value: str, max_length: int):
+def set_fstring(bytearray_: bytearray, byte_index: int, value: str, max_length: int) -> None:
     """Set space-padded fixed-length string value
 
     Args:
@@ -449,7 +449,7 @@ def set_fstring(bytearray_: bytearray, byte_index: int, value: str, max_length: 
         bytearray_[byte_index + r] = ord(' ')
 
 
-def set_string(bytearray_: bytearray, byte_index: int, value: str, max_size: int = 254):
+def set_string(bytearray_: bytearray, byte_index: int, value: str, max_size: int = 254) -> None:
     """Set string value
 
     Args:
@@ -584,10 +584,10 @@ def get_dword(bytearray_: bytearray, byte_index: int) -> int:
     """
     data = bytearray_[byte_index:byte_index + 4]
     dword = struct.unpack('>I', struct.pack('4B', *data))[0]
-    return dword
+    return cast(int, dword)
 
 
-def set_dword(bytearray_: bytearray, byte_index: int, dword: int):
+def set_dword(bytearray_: bytearray, byte_index: int, dword: int) -> None:
     """Set a DWORD to the buffer.
 
     Notes:
@@ -634,11 +634,11 @@ def get_dint(bytearray_: bytearray, byte_index: int) -> int:
             2147483647
     """
     data = bytearray_[byte_index:byte_index + 4]
-    dint = struct.unpack('>i', struct.pack('4B', *data))[0]
+    dint: int = struct.unpack('>i', struct.pack('4B', *data))[0]
     return dint
 
 
-def set_dint(bytearray_: bytearray, byte_index: int, dint: int):
+def set_dint(bytearray_: bytearray, byte_index: int, dint: int) -> None:
     """Set value in bytearray to dint
 
     Notes:
@@ -686,11 +686,11 @@ def get_udint(bytearray_: bytearray, byte_index: int) -> int:
             4294967295
     """
     data = bytearray_[byte_index:byte_index + 4]
-    dint = struct.unpack('>I', struct.pack('4B', *data))[0]
+    dint: int = struct.unpack('>I', struct.pack('4B', *data))[0]
     return dint
 
 
-def set_udint(bytearray_: bytearray, byte_index: int, udint: int):
+def set_udint(bytearray_: bytearray, byte_index: int, udint: int) -> None:
     """Set value in bytearray to unsigned dint
 
     Notes:
@@ -930,10 +930,10 @@ def get_usint(bytearray_: bytearray, byte_index: int) -> int:
     data = bytearray_[byte_index] & 0xff
     packed = struct.pack('B', data)
     value = struct.unpack('>B', packed)[0]
-    return value
+    return cast(int, value)
 
 
-def set_sint(bytearray_: bytearray, byte_index: int, _int) -> bytearray:
+def set_sint(bytearray_: bytearray, byte_index: int, _int: int) -> bytearray:
     """Set small int to the buffer.
 
     Notes:
@@ -942,7 +942,7 @@ def set_sint(bytearray_: bytearray, byte_index: int, _int) -> bytearray:
         Lowest value posible is -128.
 
     Args:
-         bytearray_: buffer to write to.
+        bytearray_: buffer to write to.
         byte_index: byte index from where to start writing.
         _int: value to write.
 
@@ -982,11 +982,11 @@ def get_sint(bytearray_: bytearray, byte_index: int) -> int:
     """
     data = bytearray_[byte_index]
     packed = struct.pack('B', data)
-    value = struct.unpack('>b', packed)[0]
+    value: int = struct.unpack('>b', packed)[0]
     return value
 
 
-def get_lint(bytearray_: bytearray, byte_index: int):
+def get_lint(bytearray_: bytearray, byte_index: int): # type: ignore
     """Get the long int
 
     THIS VALUE IS NEITHER TESTED NOR VERIFIED BY A REAL PLC AT THE MOMENT
@@ -1148,7 +1148,7 @@ def get_ulint(bytearray_: bytearray, byte_index: int) -> int:
             12345
     """
     raw_ulint = bytearray_[byte_index:byte_index + 8]
-    lint = struct.unpack('>Q', struct.pack('8B', *raw_ulint))[0]
+    lint: int = struct.unpack('>Q', struct.pack('8B', *raw_ulint))[0]
     return lint
 
 
@@ -1223,7 +1223,7 @@ def get_char(bytearray_: bytearray, byte_index: int) -> str:
     return char
 
 
-def set_char(bytearray_: bytearray, byte_index: int, chr_: str) -> Union[ValueError, bytearray]:
+def set_char(bytearray_: bytearray, byte_index: int, chr_: str) -> bytearray:
     """Set char value in a bytearray.
 
     Notes:
@@ -1417,7 +1417,7 @@ class DB:
         self.index: OrderedDict = OrderedDict()
         self.make_rows()
 
-    def make_rows(self):
+    def make_rows(self) -> None:
         """ Make each row for the DB."""
         id_field = self.id_field
         row_size = self.row_size
@@ -1454,7 +1454,7 @@ class DB:
         """
         return self.index.get(key, default)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator:
         """Iterate over the items contained in the table, in the physical order they are contained
         in memory.
 
@@ -1465,7 +1465,7 @@ class DB:
         """
         yield from self.index.items()
 
-    def __len__(self):
+    def __len__(self) -> int:
         """Return the number of rows contained in the DB.
 
         Notes:
@@ -1473,23 +1473,23 @@ class DB:
         """
         return len(self.index)
 
-    def __contains__(self, key):
+    def __contains__(self, key: Hashable) -> bool:
         """Return whether the given key is the index of a row in the DB."""
         return key in self.index
 
-    def keys(self):
+    def keys(self) -> Iterator:
         """Return a *view object* of the keys that are used as indices for the rows in the
         DB.
         """
         yield from self.index.keys()
 
-    def items(self):
+    def items(self) -> Iterator:
         """Return a *view object* of the items (``(index, row)`` pairs) that are used as indices
         for the rows in the DB.
         """
         yield from self.index.items()
 
-    def export(self):
+    def export(self) -> OrderedDict:
         """Export the object to an :class:`OrderedDict`, where each item in the dictionary
         has an index as the key, and the value of the DB row associated with that index
         as a value, represented itself as a :class:`dict` (as returned by :func:`DB_Row.export`).
@@ -1505,7 +1505,7 @@ class DB:
             ret[k] = v.export()
         return ret
 
-    def set_data(self, bytearray_: bytearray):
+    def set_data(self, bytearray_: bytearray) -> None:
         """Set the new buffer data from the PLC to the current instance.
 
         Args:
@@ -1518,7 +1518,7 @@ class DB:
             raise TypeError(f"Value bytearray_: {bytearray_} is not from type bytearray")
         self._bytearray = bytearray_
 
-    def read(self, client: Client):
+    def read(self, client: Client) -> None:
         """Reads all the rows from the PLC to the :obj:`bytearray` of this instance.
 
         Args:
@@ -1544,7 +1544,7 @@ class DB:
         self.index.clear()
         self.make_rows()
 
-    def write(self, client):
+    def write(self, client: Client) -> None:
         """Writes all the rows from the :obj:`bytearray` of this instance to the PLC
 
         Notes:
@@ -1642,18 +1642,18 @@ class DB_Row:
         """
         return {key: self[key] for key in self._specification}
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: Hashable) -> Union[int, float, str, datetime]:
         """
         Get a specific db field
         """
         index, _type = self._specification[key]
         return self.get_value(index, _type)
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key: Hashable, value: Any) -> None:
         index, _type = self._specification[key]
         self.set_value(index, _type, value)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
 
         string = ""
         for var_name, (index, _type) in self._specification.items():
@@ -1685,7 +1685,7 @@ class DB_Row:
         # the variable address with decimal point(like 0.0 or 4.0)
         return int(float(byte_index)) - self.layout_offset + self.db_offset
 
-    def get_value(self, byte_index: Union[str, int], type_: str) -> Union[ValueError, int, float, str, datetime]:
+    def get_value(self, byte_index: Union[str, int], type_: str) -> Union[int, float, str, datetime]:
         """ Gets the value for a specific type.
 
         Args:
@@ -1775,8 +1775,7 @@ class DB_Row:
 
         if type_ == 'BOOL' and isinstance(value, bool):
             byte_index, bool_index = str(byte_index).split(".")
-            return set_bool(bytearray_, self.get_offset(byte_index),
-                            int(bool_index), value)
+            set_bool(bytearray_, self.get_offset(byte_index), int(bool_index), value)
 
         byte_index = self.get_offset(byte_index)
 
@@ -1786,7 +1785,7 @@ class DB_Row:
                 raise ValueError("Max size could not be determinate. re.search() returned None")
             max_size_grouped = max_size.group(0)
             max_size_int = int(max_size_grouped)
-            return set_fstring(bytearray_, byte_index, value, max_size_int)
+            set_fstring(bytearray_, byte_index, value, max_size_int)
 
         if type_.startswith('STRING') and isinstance(value, str):
             max_size = re.search(r'\d+', type_)
@@ -1794,7 +1793,7 @@ class DB_Row:
                 raise ValueError("Max size could not be determinate. re.search() returned None")
             max_size_grouped = max_size.group(0)
             max_size_int = int(max_size_grouped)
-            return set_string(bytearray_, byte_index, value, max_size_int)
+            set_string(bytearray_, byte_index, value, max_size_int)
 
         if type_ == 'REAL':
             return set_real(bytearray_, byte_index, value)

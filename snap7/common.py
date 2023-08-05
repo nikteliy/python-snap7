@@ -3,9 +3,12 @@ import sys
 import logging
 import pathlib
 import platform
-from ctypes import c_char
-from typing import Optional
+from functools import wraps
+from ctypes import c_char, CDLL
+from typing import Optional, Callable, TypeVar, Any
 from ctypes.util import find_library
+
+T = TypeVar('T')
 
 if platform.system() == 'Windows':
     from ctypes import windll as cdll  # type: ignore
@@ -34,16 +37,14 @@ class Snap7Library:
         lib_location: full path to the `snap7.dll` file. Optional.
     """
     _instance = None
-    lib_location: Optional[str]
+    lib_location: Optional[str] = None
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, lib_location: Optional[str] = None) -> "Snap7Library":
         if not cls._instance:
-            cls._instance = object.__new__(cls)
-            cls._instance.lib_location = None
-            cls._instance.cdll = None
+            cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(self, lib_location: Optional[str] = None):
+    def __init__(self, lib_location: Optional[str] = None) -> None:
         """ Loads the snap7 library using ctypes cdll.
 
         Args:
@@ -52,7 +53,7 @@ class Snap7Library:
         Raises:
             RuntimeError: if `lib_location` is not found.
         """
-        if self.cdll:  # type: ignore
+        if hasattr(self, "cdll") and self.cdll is not None:
             return
         self.lib_location = (lib_location
                              or self.lib_location
@@ -61,16 +62,35 @@ class Snap7Library:
                              or find_locally('snap7'))
         if not self.lib_location:
             raise RuntimeError("can't find snap7 library. If installed, try running ldconfig")
-        self.cdll = cdll.LoadLibrary(self.lib_location)
+        self.cdll: CDLL = cdll.LoadLibrary(self.lib_location)
 
 
-def load_library(lib_location: Optional[str] = None):
+def load_library(lib_location: Optional[str] = None) -> CDLL:
     """Loads the `snap7.dll` library.
     Returns:
         cdll: a ctypes cdll object with the snap7 shared library loaded.
     """
     return Snap7Library(lib_location).cdll
 
+
+def error_hadler_decorator(context: str = "client") -> Callable[..., Callable[..., int]]:
+    """Decorator to handle error code returned by a decorated function.
+
+    Args:
+        context (str, optional): The context in which the decorated function is called.
+            Default is "client". Possible values are "server", "client", or "partner".
+
+    Returns:
+        Callable: A decorator function that handles errors and checks the error code.
+    """
+    def decorator(func: Callable[..., int]) -> Callable[..., int]:
+        @wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> int:
+            code = func(*args, **kwargs)
+            check_error(code, context=context)
+            return code
+        return wrapper
+    return decorator
 
 def check_error(code: int, context: str = "client") -> None:
     """Check if the error code is set. If so, a Python log message is generated
@@ -89,7 +109,7 @@ def check_error(code: int, context: str = "client") -> None:
         raise RuntimeError(error)
 
 
-def error_text(error, context: str = "client") -> bytes:
+def error_text(error: int, context: str = "client") -> bytes:
     """Returns a textual explanation of a given error number
 
     Args:

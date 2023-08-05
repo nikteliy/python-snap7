@@ -3,27 +3,24 @@ Snap7 client used for connection to a siemens 7 server.
 """
 import re
 import logging
+import ctypes # , _CArgObject, _CData, _FuncPointer, _SimpleCData
+# from _ctypes import _CT
+
+
 from ctypes import byref, create_string_buffer, sizeof
 from ctypes import Array, c_byte, c_char_p, c_int, c_int32, c_uint16, c_ulong, c_void_p
 from datetime import datetime
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, cast
 
-from ..common import check_error, ipv4, load_library
+from ..protocol import Snap7CliProtocol
+from ..common import check_error, ipv4, load_library, error_hadler_decorator
 from ..types import S7SZL, Areas, BlocksList, S7CpInfo, S7CpuInfo, S7DataItem
 from ..types import S7OrderCode, S7Protection, S7SZLList, TS7BlockInfo, WordLen
 from ..types import S7Object, buffer_size, buffer_type, cpu_statuses, param_types
 from ..types import S7CpuInfo, RemotePort, wordlen_to_ctypes, block_types
 logger = logging.getLogger(__name__)
 
-
-def error_wrap(func):
-    """Parses a s7 error code returned the decorated function."""
-
-    def f(*args, **kw):
-        code = func(*args, **kw)
-        check_error(code, context="client")
-
-    return f
+error_wrap = error_hadler_decorator(context="client")
 
 
 class Client:
@@ -45,7 +42,7 @@ class Client:
         >>> client.db_write(1, 0, data)
     """
 
-    def __init__(self, lib_location: Optional[str] = None):
+    def __init__(self, lib_location: Optional[str] = None) -> None:
         """Creates a new `Client` instance.
 
         Args:
@@ -60,21 +57,21 @@ class Client:
         """
         self._read_callback = None
         self._callback = None
-        self._pointer = None
-        self._library = load_library(lib_location)
+        self._pointer: S7Object
+        self._library: Snap7CliProtocol = load_library(lib_location)
         self.create()
 
-    def __del__(self):
+    def __del__(self) -> None:
         self.destroy()
 
-    def create(self):
+    def create(self) -> None:
         """Creates a SNAP7 client.
         """
         logger.info("creating snap7 client")
-        self._library.Cli_Create.restype = c_void_p
+        self._library.Cli_Create.restype = c_void_p # type: ignore
         self._pointer = S7Object(self._library.Cli_Create())
 
-    def destroy(self) -> Optional[int]:
+    def destroy(self) -> None:
         """Destroys the Client object.
 
         Returns:
@@ -86,10 +83,12 @@ class Client:
         """
         logger.info("destroying snap7 client")
         if self._pointer:
-            return self._library.Cli_Destroy(byref(self._pointer))
-        self._pointer = None
-        return None
+            self._library.Cli_Destroy(byref(self._pointer))
+        
+        self._pointer = None # type: ignore
+        
 
+    @error_wrap
     def plc_stop(self) -> int:
         """Puts the CPU in STOP mode
 
@@ -99,6 +98,7 @@ class Client:
         logger.info("stopping plc")
         return self._library.Cli_PlcStop(self._pointer)
 
+    @error_wrap
     def plc_cold_start(self) -> int:
         """Puts the CPU in RUN mode performing a COLD START.
 
@@ -108,6 +108,7 @@ class Client:
         logger.info("cold starting plc")
         return self._library.Cli_PlcColdStart(self._pointer)
 
+    @error_wrap
     def plc_hot_start(self) -> int:
         """Puts the CPU in RUN mode performing an HOT START.
 
@@ -131,7 +132,8 @@ class Client:
             'S7CpuStatusRun'
         """
         state = c_int(0)
-        self._library.Cli_GetPlcStatus(self._pointer, byref(state))
+        result = self._library.Cli_GetPlcStatus(self._pointer, byref(state))
+        check_error(result, context="client")
         try:
             status_string = cpu_statuses[state.value]
         except KeyError:
@@ -219,7 +221,7 @@ class Client:
         logger.debug(f"db_read, db_number:{db_number}, start:{start}, size:{size}")
 
         type_ = wordlen_to_ctypes[WordLen.Byte.value]
-        data = (type_ * size)()
+        data: _CData = (type_ * size)()
         result = (self._library.Cli_DBRead(
             self._pointer, db_number, start, size,
             byref(data)))
@@ -253,6 +255,7 @@ class Client:
         return self._library.Cli_DBWrite(self._pointer, db_number, start, size,
                                          byref(cdata))
 
+    @error_wrap
     def delete(self, block_type: str, block_num: int) -> int:
         """Delete a block into AG.
 
@@ -265,8 +268,7 @@ class Client:
         """
         logger.info("deleting block")
         blocktype = block_types[block_type]
-        result = self._library.Cli_Delete(self._pointer, blocktype, block_num)
-        return result
+        return self._library.Cli_Delete(self._pointer, blocktype, block_num)
 
     def full_upload(self, _type: str, block_num: int) -> Tuple[bytearray, int]:
         """Uploads a block from AG with Header and Footer infos.
@@ -437,7 +439,7 @@ class Client:
         return self._library.Cli_WriteArea(self._pointer, area.value, dbnumber, start,
                                            size, wordlen.value, byref(cdata))
 
-    def read_multi_vars(self, items) -> Tuple[int, S7DataItem]:
+    def read_multi_vars(self, items: Array[S7DataItem]) -> Tuple[int, Array[S7DataItem]]:
         """Reads different kind of variables from a PLC simultaneously.
 
         Args:
@@ -599,7 +601,7 @@ class Client:
         if result != 0:
             raise ValueError("The parameter was invalid")
 
-    def set_connection_type(self, connection_type: int):
+    def set_connection_type(self, connection_type: int) -> None:
         """ Sets the connection resource type, i.e the way in which the Clients connects to a PLC.
 
         Args:
@@ -647,6 +649,7 @@ class Client:
         check_error(result, context="client")
         return bytearray(data)
 
+    @error_wrap
     def ab_write(self, start: int, data: bytearray) -> int:
         """Writes a part of IPU area into a PLC.
 
@@ -665,7 +668,8 @@ class Client:
         return self._library.Cli_ABWrite(
             self._pointer, start, size, byref(cdata))
 
-    def as_ab_read(self, start: int, size: int, data) -> int:
+    @error_wrap
+    def as_ab_read(self, start: int, size: int, data: _CData) -> int:
         """Reads a part of IPU area from a PLC asynchronously.
 
         Args:
@@ -677,11 +681,10 @@ class Client:
             Snap7 code.
         """
         logger.debug(f"ab_read: start: {start}: size {size}: ")
-        result = self._library.Cli_AsABRead(self._pointer, start, size,
+        return self._library.Cli_AsABRead(self._pointer, start, size,
                                             byref(data))
-        check_error(result, context="client")
-        return result
 
+    @error_wrap
     def as_ab_write(self, start: int, data: bytearray) -> int:
         """Writes a part of IPU area into a PLC asynchronously.
 
@@ -697,11 +700,10 @@ class Client:
         size = len(data)
         cdata = (type_ * size).from_buffer_copy(data)
         logger.debug(f"ab write: start: {start}: size: {size}: ")
-        result = self._library.Cli_AsABWrite(
+        return self._library.Cli_AsABWrite(
             self._pointer, start, size, byref(cdata))
-        check_error(result, context="client")
-        return result
 
+    @error_wrap
     def as_compress(self, time: int) -> int:
         """	Performs the Compress action asynchronously.
 
@@ -711,10 +713,9 @@ class Client:
         Returns:
             Snap7 code.
         """
-        result = self._library.Cli_AsCompress(self._pointer, time)
-        check_error(result, context="client")
-        return result
+        return self._library.Cli_AsCompress(self._pointer, time)
 
+    @error_wrap
     def as_copy_ram_to_rom(self, timeout: int = 1) -> int:
         """Performs the Copy Ram to Rom action asynchronously.
 
@@ -724,11 +725,9 @@ class Client:
         Returns:
             Snap7 code.
         """
-        result = self._library.Cli_AsCopyRamToRom(self._pointer, timeout)
-        check_error(result, context="client")
-        return result
+        return self._library.Cli_AsCopyRamToRom(self._pointer, timeout)
 
-    def as_ct_read(self, start: int, amount: int, data) -> int:
+    def as_ct_read(self, start: int, amount: int, data: _CData) -> int:
         """Reads counters from a PLC asynchronously.
 
         Args:
@@ -739,10 +738,9 @@ class Client:
         Returns:
             Snap7 code.
         """
-        result = self._library.Cli_AsCTRead(self._pointer, start, amount, byref(data))
-        check_error(result, context="client")
-        return result
-
+        return self._library.Cli_AsCTRead(self._pointer, start, amount, byref(data))
+        
+    @error_wrap
     def as_ct_write(self, start: int, amount: int, data: bytearray) -> int:
         """Write counters into a PLC.
 
@@ -756,11 +754,11 @@ class Client:
         """
         type_ = wordlen_to_ctypes[WordLen.Counter.value]
         cdata = (type_ * amount).from_buffer_copy(data)
-        result = self._library.Cli_AsCTWrite(self._pointer, start, amount, byref(cdata))
-        check_error(result, context="client")
-        return result
+        return self._library.Cli_AsCTWrite(self._pointer, start, amount, byref(cdata))
 
-    def as_db_fill(self, db_number: int, filler) -> int:
+
+    @error_wrap
+    def as_db_fill(self, db_number: int, filler: int) -> int:
         """Fills a DB in AG with a given byte.
 
         Args:
@@ -770,11 +768,10 @@ class Client:
         Returns:
             Snap7 code.
         """
-        result = self._library.Cli_AsDBFill(self._pointer, db_number, filler)
-        check_error(result, context="client")
-        return result
-
-    def as_db_get(self, db_number: int, _buffer, size) -> bytearray:
+        return self._library.Cli_AsDBFill(self._pointer, db_number, filler)
+        
+    @error_wrap
+    def as_db_get(self, db_number: int, _buffer: _CData, size: c_int) -> int:
         """Uploads a DB from AG using DBRead.
 
         Note:
@@ -788,11 +785,10 @@ class Client:
         Returns:
             Snap7 code.
         """
-        result = self._library.Cli_AsDBGet(self._pointer, db_number, byref(_buffer), byref(size))
-        check_error(result, context="client")
-        return result
+        return self._library.Cli_AsDBGet(self._pointer, db_number, byref(_buffer), byref(size))
 
-    def as_db_read(self, db_number: int, start: int, size: int, data) -> Array:
+
+    def as_db_read(self, db_number: int, start: int, size: int, data: _CData) -> int:
         """Reads a part of a DB from a PLC.
 
         Args:
@@ -815,7 +811,8 @@ class Client:
         check_error(result, context="client")
         return result
 
-    def as_db_write(self, db_number: int, start: int, size: int, data) -> int:
+    @error_wrap
+    def as_db_write(self, db_number: int, start: int, size: int, data: _CData) -> int:
         """Writes a part of a DB into a PLC.
 
         Args:
@@ -827,10 +824,10 @@ class Client:
         Returns:
             Snap7 code.
         """
-        result = self._library.Cli_AsDBWrite(self._pointer, db_number, start, size, byref(data))
-        check_error(result, context="client")
-        return result
+        return self._library.Cli_AsDBWrite(self._pointer, db_number, start, size, byref(data))
 
+
+    @error_wrap
     def as_download(self, data: bytearray, block_num: int) -> int:
         """Download a block into AG asynchronously.
 
@@ -847,9 +844,8 @@ class Client:
         size = len(data)
         type_ = c_byte * len(data)
         cdata = type_.from_buffer_copy(data)
-        result = self._library.Cli_AsDownload(self._pointer, block_num, byref(cdata), size)
-        check_error(result)
-        return result
+        return self._library.Cli_AsDownload(self._pointer, block_num, byref(cdata), size)
+
 
     @error_wrap
     def compress(self, time: int) -> int:
@@ -956,7 +952,8 @@ class Client:
 
         return self._library.Cli_SetPlcDateTime(self._pointer, byref(buffer))
 
-    def check_as_completion(self, p_value) -> int:
+    @error_wrap
+    def check_as_completion(self, p_value: c_int) -> int:
         """Method to check Status of an async request. Result contains if the check was successful, not the data value itself
 
         Args:
@@ -965,16 +962,14 @@ class Client:
         Returns:
             Snap7 code. If 0 - Job is done successfully. If 1 - Job is either pending or contains s7errors
         """
-        result = self._library.Cli_CheckAsCompletion(self._pointer, p_value)
-        check_error(result, context="client")
-        return result
+        return self._library.Cli_CheckAsCompletion(self._pointer, p_value)
 
-    def set_as_callback(self, pfn_clicompletion, p_usr):
+    @error_wrap
+    def set_as_callback(self, pfn_clicompletion: type[_FuncPointer], p_usr: S7Object) -> int:
         # Cli_SetAsCallback
-        result = self._library.Cli_SetAsCallback(self._pointer, pfn_clicompletion, p_usr)
-        check_error(result, context='client')
-        return result
+        return self._library.Cli_SetAsCallback(self._pointer, pfn_clicompletion, p_usr)
 
+    @error_wrap
     def wait_as_completion(self, timeout: int) -> int:
         """Snap7 Cli_WaitAsCompletion representative.
 
@@ -984,12 +979,10 @@ class Client:
         Returns:
             Snap7 code.
         """
-        # Cli_WaitAsCompletion
-        result = self._library.Cli_WaitAsCompletion(self._pointer, c_ulong(timeout))
-        check_error(result, context="client")
-        return result
+        return self._library.Cli_WaitAsCompletion(self._pointer, c_ulong(timeout))
 
-    def _prepare_as_read_area(self, area: Areas, size: int) -> Tuple[WordLen, Array]:
+
+    def _prepare_as_read_area(self, area: Areas, size: int) -> Tuple[WordLen, _CData]:
         if area not in Areas:
             raise ValueError(f"{area} is not implemented in types")
         elif area == Areas.TM:
@@ -1002,7 +995,8 @@ class Client:
         usrdata = (type_ * size)()
         return wordlen, usrdata
 
-    def as_read_area(self, area: Areas, dbnumber: int, start: int, size: int, wordlen: WordLen, pusrdata) -> int:
+    @error_wrap
+    def as_read_area(self, area: Areas, dbnumber: int, start: int, size: int, wordlen: WordLen, pusrdata: ctypes._CArgObject) -> int:
         """Reads a data area from a PLC asynchronously.
         With it you can read DB, Inputs, Outputs, Merkers, Timers and Counters.
 
@@ -1018,11 +1012,10 @@ class Client:
             Snap7 code.
         """
         logger.debug(f"reading area: {area.name} dbnumber: {dbnumber} start: {start}: amount {size}: wordlen: {wordlen.name}={wordlen.value}")
-        result = self._library.Cli_AsReadArea(self._pointer, area.value, dbnumber, start, size, wordlen.value, pusrdata)
-        check_error(result, context="client")
-        return result
+        return self._library.Cli_AsReadArea(self._pointer, area.value, dbnumber, start, size, wordlen.value, pusrdata)
 
-    def _prepare_as_write_area(self, area: Areas, data: bytearray) -> Tuple[WordLen, Array]:
+
+    def _prepare_as_write_area(self, area: Areas, data: bytearray) -> Tuple[WordLen, _CData]:
         if area not in Areas:
             raise ValueError(f"{area} is not implemented in types")
         elif area == Areas.TM:
@@ -1035,7 +1028,8 @@ class Client:
         cdata = (type_ * len(data)).from_buffer_copy(data)
         return wordlen, cdata
 
-    def as_write_area(self, area: Areas, dbnumber: int, start: int, size: int, wordlen: WordLen, pusrdata) -> int:
+    @error_wrap
+    def as_write_area(self, area: Areas, dbnumber: int, start: int, size: int, wordlen: WordLen, pusrdata: bytearray) -> int:
         """Writes a data area into a PLC asynchronously.
 
         Args:
@@ -1043,8 +1037,8 @@ class Client:
             dbnumber: The DB number, only used when area=Areas.DB
             start: offset to start writing.
             size: amount of bytes to be written.
-            wordlen: length of the word to be written.
-            pusrdata: buffer to be written.
+            wordlen: length  to be written.
+            pusrdata: buffer to be writtof the worden.
 
         Returns:
             Snap7 code.
@@ -1052,12 +1046,11 @@ class Client:
         type_ = wordlen_to_ctypes[WordLen.Byte.value]
         logger.debug(f"writing area: {area.name} dbnumber: {dbnumber} start: {start}: size {size}: "
                      f"wordlen {wordlen} type: {type_}")
-        cdata = (type_ * len(pusrdata)).from_buffer_copy(pusrdata)
-        res = self._library.Cli_AsWriteArea(self._pointer, area.value, dbnumber, start, size, wordlen.value, byref(cdata))
-        check_error(res, context="client")
-        return res
+        cdata: _CData = (type_ * len(pusrdata)).from_buffer_copy(pusrdata)
+        return self._library.Cli_AsWriteArea(self._pointer, area.value, dbnumber, start, size, wordlen.value, byref(cdata))
 
-    def as_eb_read(self, start: int, size: int, data) -> int:
+    @error_wrap
+    def as_eb_read(self, start: int, size: int, data: _CData) -> int:
         """Reads a part of IPI area from a PLC asynchronously.
 
         Args:
@@ -1068,10 +1061,9 @@ class Client:
         Returns:
             Snap7 code.
         """
-        result = self._library.Cli_AsEBRead(self._pointer, start, size, byref(data))
-        check_error(result, context="client")
-        return result
+        return self._library.Cli_AsEBRead(self._pointer, start, size, byref(data))
 
+    @error_wrap
     def as_eb_write(self, start: int, size: int, data: bytearray) -> int:
         """Writes a part of IPI area into a PLC.
 
@@ -1085,10 +1077,9 @@ class Client:
         """
         type_ = wordlen_to_ctypes[WordLen.Byte.value]
         cdata = (type_ * size).from_buffer_copy(data)
-        result = self._library.Cli_AsEBWrite(self._pointer, start, size, byref(cdata))
-        check_error(result, context="client")
-        return result
+        return self._library.Cli_AsEBWrite(self._pointer, start, size, byref(cdata))
 
+    @error_wrap
     def as_full_upload(self, _type: str, block_num: int) -> int:
         """Uploads a block from AG with Header and Footer infos.
 
@@ -1104,12 +1095,11 @@ class Client:
         """
         _buffer = buffer_type()
         size = c_int(sizeof(_buffer))
-        block_type = block_types[_type]
-        result = self._library.Cli_AsFullUpload(self._pointer, block_type, block_num, byref(_buffer), byref(size))
-        check_error(result, context="client")
-        return result
+        block_type = block_types[_type] 
+        return self._library.Cli_AsFullUpload(self._pointer, block_type, block_num, byref(_buffer), byref(size))
 
-    def as_list_blocks_of_type(self, blocktype: str, data, count) -> int:
+    @error_wrap
+    def as_list_blocks_of_type(self, blocktype: str, data: _CData, count: c_int) -> int:
         """Returns the AG blocks list of a given type.
 
         Args:
@@ -1126,11 +1116,9 @@ class Client:
         _blocktype = block_types.get(blocktype)
         if not _blocktype:
             raise ValueError("The blocktype parameter was invalid")
-        result = self._library.Cli_AsListBlocksOfType(self._pointer, _blocktype, byref(data), byref(count))
-        check_error(result, context="client")
-        return result
+        return self._library.Cli_AsListBlocksOfType(self._pointer, _blocktype, byref(data), byref(count))
 
-    def as_mb_read(self, start: int, size: int, data) -> int:
+    def as_mb_read(self, start: int, size: int, data: _CData) -> int:
         """Reads a part of Merkers area from a PLC.
 
         Args:
@@ -1141,10 +1129,9 @@ class Client:
         Returns:
             Snap7 code.
         """
-        result = self._library.Cli_AsMBRead(self._pointer, start, size, byref(data))
-        check_error(result, context="client")
-        return result
+        return self._library.Cli_AsMBRead(self._pointer, start, size, byref(data))
 
+    @error_wrap
     def as_mb_write(self, start: int, size: int, data: bytearray) -> int:
         """Writes a part of Merkers area into a PLC.
 
@@ -1158,32 +1145,29 @@ class Client:
         """
         type_ = wordlen_to_ctypes[WordLen.Byte.value]
         cdata = (type_ * size).from_buffer_copy(data)
-        result = self._library.Cli_AsMBWrite(self._pointer, start, size, byref(cdata))
-        check_error(result, context="client")
-        return result
+        return self._library.Cli_AsMBWrite(self._pointer, start, size, byref(cdata))
 
-    def as_read_szl(self, ssl_id: int, index: int, s7_szl: S7SZL, size) -> int:
+    def as_read_szl(self, ssl_id: int, index: int, s7_szl: S7SZL, size: c_int) -> int:
         """Reads a partial list of given ID and Index.
 
         Args:
-            ssl_id: TODO
-            index: TODO
-            s7_szl: TODO
-            size: TODO
+            ssl_id: ID of partial system status lists
+            index: index of a particular data record 
+            s7_szl: structure where the data read will be place.
+            size: amount of byte to read.
 
         Returns:
             Snap7 code.
         """
-        result = self._library.Cli_AsReadSZL(self._pointer, ssl_id, index, byref(s7_szl), byref(size))
-        check_error(result, context="client")
-        return result
+        return self._library.Cli_AsReadSZL(self._pointer, ssl_id, index, byref(s7_szl), byref(size))
 
-    def as_read_szl_list(self, szl_list, items_count) -> int:
+
+    def as_read_szl_list(self, szl_list: S7SZLList, items_count: c_int) -> int:
         """Reads the list of partial lists available in the CPU.
 
         Args:
-            szl_list: TODO
-            items_count: TODO
+            szl_list: structure where the data read will be place.
+            items_count: amount of data records
 
         Returns:
             Snap7 code.
@@ -1192,7 +1176,8 @@ class Client:
         check_error(result, context="client")
         return result
 
-    def as_tm_read(self, start: int, amount: int, data) -> bytearray:
+    @error_wrap
+    def as_tm_read(self, start: int, amount: int, data: _CData) -> int:
         """Reads timers from a PLC.
 
         Args:
@@ -1203,11 +1188,10 @@ class Client:
         Returns:
             Snap7 code.
         """
-        result = self._library.Cli_AsTMRead(self._pointer, start, amount, byref(data))
-        check_error(result, context="client")
-        return result
+        return self._library.Cli_AsTMRead(self._pointer, start, amount, byref(data))
 
-    def as_tm_write(self, start: int, amount: int, data: bytearray) -> int:
+    @error_wrap
+    def as_tm_write(self, start: int, amount: int, data: _CData) -> int:
         """Write timers into a PLC.
 
         Args:
@@ -1220,11 +1204,10 @@ class Client:
         """
         type_ = wordlen_to_ctypes[WordLen.Timer.value]
         cdata = (type_ * amount).from_buffer_copy(data)
-        result = self._library.Cli_AsTMWrite(self._pointer, start, amount, byref(cdata))
-        check_error(result)
-        return result
+        return self._library.Cli_AsTMWrite(self._pointer, start, amount, byref(cdata))
 
-    def as_upload(self, block_num: int, _buffer, size) -> int:
+    @error_wrap
+    def as_upload(self, block_num: int, _buffer: _CData, size: c_int) -> int:
         """Uploads a block from AG.
 
         Note:
@@ -1239,10 +1222,9 @@ class Client:
             Snap7 code.
         """
         block_type = block_types['DB']
-        result = self._library.Cli_AsUpload(self._pointer, block_type, block_num, byref(_buffer), byref(size))
-        check_error(result, context="client")
-        return result
+        return self._library.Cli_AsUpload(self._pointer, block_type, block_num, byref(_buffer), byref(size))
 
+    @error_wrap
     def copy_ram_to_rom(self, timeout: int = 1) -> int:
         """Performs the Copy Ram to Rom action.
 
@@ -1252,9 +1234,7 @@ class Client:
         Returns:
             Snap7 code.
         """
-        result = self._library.Cli_CopyRamToRom(self._pointer, timeout)
-        check_error(result, context="client")
-        return result
+        return self._library.Cli_CopyRamToRom(self._pointer, timeout)
 
     def ct_read(self, start: int, amount: int) -> bytearray:
         """Reads counters from a PLC.
@@ -1272,6 +1252,7 @@ class Client:
         check_error(result, context="client")
         return bytearray(data)
 
+    @error_wrap
     def ct_write(self, start: int, amount: int, data: bytearray) -> int:
         """Write counters into a PLC.
 
@@ -1285,10 +1266,10 @@ class Client:
         """
         type_ = wordlen_to_ctypes[WordLen.Counter.value]
         cdata = (type_ * amount).from_buffer_copy(data)
-        result = self._library.Cli_CTWrite(self._pointer, start, amount, byref(cdata))
-        check_error(result)
-        return result
+        return self._library.Cli_CTWrite(self._pointer, start, amount, byref(cdata))
 
+
+    @error_wrap
     def db_fill(self, db_number: int, filler: int) -> int:
         """Fills a DB in AG with a given byte.
 
@@ -1299,9 +1280,8 @@ class Client:
         Returns:
             Snap7 code.
         """
-        result = self._library.Cli_DBFill(self._pointer, db_number, filler)
-        check_error(result)
-        return result
+        return self._library.Cli_DBFill(self._pointer, db_number, filler)
+
 
     def eb_read(self, start: int, size: int) -> bytearray:
         """Reads a part of IPI area from a PLC.
@@ -1319,6 +1299,7 @@ class Client:
         check_error(result, context="client")
         return bytearray(data)
 
+    @error_wrap
     def eb_write(self, start: int, size: int, data: bytearray) -> int:
         """Writes a part of IPI area into a PLC.
 
@@ -1332,9 +1313,7 @@ class Client:
         """
         type_ = wordlen_to_ctypes[WordLen.Byte.value]
         cdata = (type_ * size).from_buffer_copy(data)
-        result = self._library.Cli_EBWrite(self._pointer, start, size, byref(cdata))
-        check_error(result)
-        return result
+        return self._library.Cli_EBWrite(self._pointer, start, size, byref(cdata))
 
     def error_text(self, error: int) -> str:
         """Returns a textual explanation of a given error number.
@@ -1364,6 +1343,7 @@ class Client:
         check_error(result)
         return cp_info
 
+    @error_wrap
     def get_exec_time(self) -> int:
         """Returns the last job execution time in milliseconds.
 
@@ -1371,9 +1351,7 @@ class Client:
             Execution time value.
         """
         time = c_int32()
-        result = self._library.Cli_GetExecTime(self._pointer, byref(time))
-        check_error(result)
-        return time.value
+        return self._library.Cli_GetExecTime(self._pointer, byref(time))
 
     def get_last_error(self) -> int:
         """Returns the last job result.
@@ -1456,6 +1434,7 @@ class Client:
         check_error(result, context="client")
         return bytearray(data)
 
+    @error_wrap
     def mb_write(self, start: int, size: int, data: bytearray) -> int:
         """Writes a part of Merkers area into a PLC.
 
@@ -1469,9 +1448,8 @@ class Client:
         """
         type_ = wordlen_to_ctypes[WordLen.Byte.value]
         cdata = (type_ * size).from_buffer_copy(data)
-        result = self._library.Cli_MBWrite(self._pointer, start, size, byref(cdata))
-        check_error(result)
-        return result
+        return self._library.Cli_MBWrite(self._pointer, start, size, byref(cdata))
+
 
     def read_szl(self, ssl_id: int, index: int = 0x0000) -> S7SZL:
         """Reads a partial list of given ID and Index.
@@ -1502,15 +1480,15 @@ class Client:
         result = bytearray(szl_list.List)[:items_count.value]
         return result
 
+    @error_wrap
     def set_plc_system_datetime(self) -> int:
         """Sets the PLC date/time with the host (PC) date/time.
 
         Returns:
             Snap7 code.
         """
-        result = self._library.Cli_SetPlcSystemDateTime(self._pointer)
-        check_error(result)
-        return result
+        return self._library.Cli_SetPlcSystemDateTime(self._pointer)
+
 
     def tm_read(self, start: int, amount: int) -> bytearray:
         """Reads timers from a PLC.
@@ -1529,6 +1507,7 @@ class Client:
         check_error(result, context="client")
         return bytearray(data)
 
+    @error_wrap
     def tm_write(self, start: int, amount: int, data: bytearray) -> int:
         """Write timers into a PLC.
 
@@ -1543,10 +1522,9 @@ class Client:
         wordlen = WordLen.Timer
         type_ = wordlen_to_ctypes[wordlen.value]
         cdata = (type_ * amount).from_buffer_copy(data)
-        result = self._library.Cli_TMWrite(self._pointer, start, amount, byref(cdata))
-        check_error(result)
-        return result
+        return self._library.Cli_TMWrite(self._pointer, start, amount, byref(cdata))
 
+    @error_wrap
     def write_multi_vars(self, items: List[S7DataItem]) -> int:
         """Writes different kind of variables into a PLC simultaneously.
 
@@ -1561,6 +1539,4 @@ class Client:
         for item in items:
             data += bytearray(item)
         cdata = (S7DataItem * len(items)).from_buffer_copy(data)
-        result = self._library.Cli_WriteMultiVars(self._pointer, byref(cdata), items_count)
-        check_error(result, context="client")
-        return result
+        return self._library.Cli_WriteMultiVars(self._pointer, byref(cdata), items_count)
