@@ -1,7 +1,7 @@
 name: build-and-test-wheels-arm32
 on:
   push:
-    branches: *
+    branches: ["*"]
   pull_request:
     branches: [master]
 jobs:
