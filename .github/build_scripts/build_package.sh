@@ -9,4 +9,4 @@ cp /usr/lib/libsnap7.so snap7/lib/
 ${INPUT_PYTHON} -m pip install --upgrade pip wheel build auditwheel patchelf
 ${INPUT_PYTHON} -m build . --wheel -C="--plat-name=${INPUT_PLATFORM}"
 
-auditwheel repair dist/*${INPUT_PLATFORM}.whl --plat ${INPUT_PLATFORM} -w ${INPUT_WHEELDIR}
+auditwheel repair dist/*.whl --plat ${INPUT_PLATFORM} -w ${INPUT_WHEELDIR}
