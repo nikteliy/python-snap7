@@ -1,9 +1,9 @@
 name: Windows Test
 on:
   push:
-    branches: [master]
-  pull_request:
-    branches: [master]
+  #   branches: [master]
+  # pull_request:
+  #   branches: [master]
 jobs:
   windows_wheel:
     continue-on-error: true
