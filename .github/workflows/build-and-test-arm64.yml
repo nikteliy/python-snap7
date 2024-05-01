@@ -21,10 +21,10 @@ jobs:
           platforms: arm64
 
       - name: Build wheel
-        uses: ./.github/actions/manylinux_2_24_aarch64
+        uses: ./.github/actions/manylinux2014_aarch64
         with:
           script: ./.github/build_scripts/build_package.sh
-          platform: manylinux_2_24_aarch64
+          platform: manylinux2014_aarch64
           makefile: aarch64-linux-gnu.mk
           python: /opt/python/cp38-cp38/bin/python
 
