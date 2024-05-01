@@ -16,10 +16,10 @@ jobs:
         uses: ./.github/actions/prepare_snap7
 
       - name: Build wheel
-        uses: ./.github/actions/manylinux2014_x86_64
+        uses: ./.github/actions/manylinux_2_28_x86_64
         with:
           script: ./.github/build_scripts/build_package.sh
-          platform: manylinux2014_x86_64
+          platform: manylinux_2_28_x86_64
           makefile: x86_64_linux.mk
           python: /opt/python/cp38-cp38/bin/python
           wheeldir: wheelhouse/${{ runner.os }}/
